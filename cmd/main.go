@@ -53,13 +53,14 @@ func main() {
 	// Health check endpoint
 	r.GET("/health", venueHandler.HealthCheck)
 
-	// Public endpoints (no auth required)
+	// Public endpoints (optional auth - will filter if authenticated)
 	public := r.Group("/api/venue")
+	public.Use(middleware.OptionalAuth(authService))
 	{
-		// Get all locations (public for frontend)
+		// Get all locations (public for frontend, but filters by user if authenticated)
 		public.GET("/locations", venueHandler.GetAllLocations)
 
-		// Get tables by location (public for frontend)
+		// Get tables by location (public for frontend, but verifies access if authenticated)
 		public.GET("/:locationId/tables", venueHandler.GetTablesByLocation)
 	}
 
@@ -77,7 +78,15 @@ func main() {
 		protected.POST("/tables", venueHandler.CreateTable)
 		protected.GET("/tables/:id", venueHandler.GetTableByID)
 		protected.PUT("/tables/:id", venueHandler.UpdateTable)
+		protected.PUT("/tables/:id/status", venueHandler.UpdateTableStatus)
 		protected.DELETE("/tables/:id", venueHandler.DeleteTable)
+	}
+
+	// Internal endpoints (for inter-service communication, no auth required)
+	internal := r.Group("/internal/venue")
+	{
+		// Update table status (called by ordering service)
+		internal.PUT("/tables/:id/status", venueHandler.UpdateTableStatus)
 	}
 
 	// Admin-only endpoints

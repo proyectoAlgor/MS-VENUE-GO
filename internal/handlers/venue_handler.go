@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"ms-venue-go/internal/models"
 	"ms-venue-go/internal/service"
@@ -29,6 +30,11 @@ func (h *VenueHandler) CreateLocation(c *gin.Context) {
 
 	location, err := h.venueService.CreateLocation(&req)
 	if err != nil {
+		// Check if it's a duplicate error
+		if strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -37,7 +43,24 @@ func (h *VenueHandler) CreateLocation(c *gin.Context) {
 }
 
 func (h *VenueHandler) GetAllLocations(c *gin.Context) {
-	locations, err := h.venueService.GetAllLocations()
+	// Get user ID and token from context (set by OptionalAuth middleware)
+	userID, exists := c.Get("user_id")
+
+	// Get token from Authorization header
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if authHeader != "" {
+		token = strings.TrimPrefix(authHeader, "Bearer ")
+	}
+
+	// If no user ID in context but there's a token, try to use it anyway
+	// This handles cases where OptionalAuth might not have set user_id
+	userIDStr := ""
+	if exists {
+		userIDStr = userID.(string)
+	}
+
+	locations, err := h.venueService.GetAllLocations(userIDStr, token)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -110,6 +133,11 @@ func (h *VenueHandler) CreateTable(c *gin.Context) {
 
 	table, err := h.venueService.CreateTable(&req)
 	if err != nil {
+		// Check if it's a duplicate error
+		if strings.Contains(err.Error(), "already exists") {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -124,8 +152,27 @@ func (h *VenueHandler) GetTablesByLocation(c *gin.Context) {
 		return
 	}
 
-	tables, err := h.venueService.GetTablesByLocation(locationID)
+	// Get user ID and token from context (set by auth middleware if authenticated)
+	userID, exists := c.Get("user_id")
+	userIDStr := ""
+	if exists {
+		userIDStr = userID.(string)
+	}
+
+	// Get token from Authorization header
+	authHeader := c.GetHeader("Authorization")
+	token := ""
+	if authHeader != "" {
+		token = strings.TrimPrefix(authHeader, "Bearer ")
+	}
+
+	tables, err := h.venueService.GetTablesByLocation(locationID, userIDStr, token)
 	if err != nil {
+		// Check if it's an access denied error
+		if strings.Contains(err.Error(), "access denied") {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -163,6 +210,34 @@ func (h *VenueHandler) UpdateTable(c *gin.Context) {
 	}
 
 	table, err := h.venueService.UpdateTable(id, &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, table)
+}
+
+func (h *VenueHandler) UpdateTableStatus(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Table ID is required"})
+		return
+	}
+
+	var req struct {
+		Status string `json:"status" binding:"required,oneof=available occupied"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updateReq := &models.UpdateTableRequest{
+		Status: req.Status,
+	}
+
+	table, err := h.venueService.UpdateTable(id, updateReq)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

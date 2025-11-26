@@ -12,6 +12,7 @@ type VenueRepository interface {
 	// Location operations
 	CreateLocation(location *models.Location) error
 	GetAllLocations() ([]models.Location, error)
+	GetLocationsByIDs(locationIDs []string) ([]models.Location, error)
 	GetLocationByID(id string) (*models.Location, error)
 	UpdateLocation(id string, location *models.Location) error
 	DeleteLocation(id string) error
@@ -47,17 +48,36 @@ func NewVenueRepository(dbURL string) (VenueRepository, error) {
 
 // Location operations
 func (r *venueRepository) CreateLocation(location *models.Location) error {
+	// Check if location with same code already exists
+	checkQuery := `
+		SELECT id FROM bar_system.locations 
+		WHERE code = $1 AND is_active = true
+	`
+	var existingID string
+	err := r.db.QueryRow(checkQuery, location.Code).Scan(&existingID)
+	if err == nil {
+		// Location already exists
+		return fmt.Errorf("venue with code '%s' already exists", location.Code)
+	} else if err != sql.ErrNoRows {
+		// Unexpected error
+		return fmt.Errorf("error checking for existing venue: %w", err)
+	}
+
+	// Location doesn't exist, proceed with creation
 	query := `
 		INSERT INTO bar_system.locations (id, code, name, address, is_active)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (code) DO NOTHING
 		RETURNING created_at, updated_at
 	`
 
-	err := r.db.QueryRow(query, location.ID, location.Code, location.Name,
+	err = r.db.QueryRow(query, location.ID, location.Code, location.Name,
 		location.Address, location.IsActive).Scan(&location.CreatedAt, &location.UpdatedAt)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to create venue: %w", err)
+	}
+
+	return nil
 }
 
 func (r *venueRepository) GetAllLocations() ([]models.Location, error) {
@@ -69,6 +89,39 @@ func (r *venueRepository) GetAllLocations() ([]models.Location, error) {
 	`
 
 	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	locations := make([]models.Location, 0)
+	for rows.Next() {
+		var location models.Location
+		err := rows.Scan(&location.ID, &location.Code, &location.Name,
+			&location.Address, &location.IsActive, &location.CreatedAt, &location.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		locations = append(locations, location)
+	}
+
+	return locations, nil
+}
+
+func (r *venueRepository) GetLocationsByIDs(locationIDs []string) ([]models.Location, error) {
+	if len(locationIDs) == 0 {
+		return []models.Location{}, nil
+	}
+
+	// Build query with IN clause
+	query := `
+		SELECT id, code, name, address, is_active, created_at, updated_at
+		FROM bar_system.locations 
+		WHERE is_active = true AND id = ANY($1)
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.Query(query, locationIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -130,17 +183,36 @@ func (r *venueRepository) DeleteLocation(id string) error {
 
 // Table operations
 func (r *venueRepository) CreateTable(table *models.Table) error {
+	// Check if table with same code already exists in this location
+	checkQuery := `
+		SELECT id FROM bar_system.tables 
+		WHERE location_id = $1 AND code = $2 AND is_active = true
+	`
+	var existingID string
+	err := r.db.QueryRow(checkQuery, table.LocationID, table.Code).Scan(&existingID)
+	if err == nil {
+		// Table already exists
+		return fmt.Errorf("table with code '%s' already exists in this venue", table.Code)
+	} else if err != sql.ErrNoRows {
+		// Unexpected error
+		return fmt.Errorf("error checking for existing table: %w", err)
+	}
+
+	// Table doesn't exist, proceed with creation
 	query := `
 		INSERT INTO bar_system.tables (id, location_id, code, seats, status, is_active)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (location_id, code) DO NOTHING
 		RETURNING created_at, updated_at
 	`
 
-	err := r.db.QueryRow(query, table.ID, table.LocationID, table.Code,
+	err = r.db.QueryRow(query, table.ID, table.LocationID, table.Code,
 		table.Seats, table.Status, table.IsActive).Scan(&table.CreatedAt, &table.UpdatedAt)
 
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to create table: %w", err)
+	}
+
+	return nil
 }
 
 func (r *venueRepository) GetTablesByLocation(locationID string) ([]models.Table, error) {

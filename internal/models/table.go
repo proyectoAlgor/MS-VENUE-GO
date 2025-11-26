@@ -9,7 +9,7 @@ type Table struct {
 	LocationID string    `json:"location_id" db:"location_id"`
 	Code       string    `json:"code" db:"code"`
 	Seats      int       `json:"seats" db:"seats"`
-	Status     string    `json:"status" db:"status"` // free, occupied, reserved
+	Status     string    `json:"status" db:"status"` // available, occupied (no reservations allowed)
 	IsActive   bool      `json:"is_active" db:"is_active"`
 	CreatedAt  time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
@@ -24,6 +24,6 @@ type CreateTableRequest struct {
 type UpdateTableRequest struct {
 	Code     string `json:"code"`
 	Seats    int    `json:"seats" binding:"min=1,max=20"`
-	Status   string `json:"status" binding:"omitempty,oneof=free occupied reserved"`
+	Status   string `json:"status" binding:"omitempty,oneof=available occupied"`
 	IsActive *bool  `json:"is_active"`
 }
